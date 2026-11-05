@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parkour Gauchesco · Simões Lopes Neto</title>
+<style>
+  :root{
+    --ink:#f4ead5; --gold:#e8b44a; --red:#b8432f; --green:#3f7d3a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at top,#3a2a1c,#120c08);
+    font-family:Georgia,'Trebuchet MS',serif; color:var(--ink); user-select:none;
+  }
+  #wrap{position:relative; width:min(96vw,960px); aspect-ratio:800/480}
+  canvas{
+    width:100%; height:100%; display:block; border-radius:10px;
+    border:3px solid #5a3b22; box-shadow:0 10px 40px #000a; background:#000;
+  }
+  .overlay{
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+    background:rgba(18,12,8,.9); border-radius:10px; padding:18px;
+    overflow:auto;
+  }
+  .hidden{display:none !important}
+  h1{font-size:clamp(20px,4vw,34px); color:var(--gold); margin:.2em 0}
+  h2{color:var(--gold); font-size:clamp(15px,2.6vw,20px); margin:.3em 0}
+  p{max-width:620px; line-height:1.5; font-size:clamp(12px,1.9vw,15px); margin:.4em 0}
+  .btn{
+    background:linear-gradient(#e8b44a,#b07a22); color:#2b1a08; border:0;
+    padding:10px 26px; border-radius:8px; font:bold 16px Georgia,serif;
+    cursor:pointer; margin-top:12px; box-shadow:0 4px 0 #6b4612;
+  }
+  .btn:active{transform:translateY(2px); box-shadow:0 2px 0 #6b4612}
+  .opts{display:grid; grid-template-columns:1fr 1fr; gap:10px; width:min(620px,94%); margin-top:10px}
+  .opt{
+    background:#2d2016; color:var(--ink); border:2px solid #7a5530; border-radius:8px;
+    padding:10px 12px; font:clamp(12px,1.8vw,15px) Georgia,serif; cursor:pointer; text-align:left;
+  }
+  .opt:hover:not(:disabled){border-color:var(--gold)}
+  .opt:disabled{cursor:default; opacity:.75}
+  .opt.correct{background:#2f6b2c; border-color:#8fd47f; opacity:1}
+  .opt.wrong{background:#7a2a1f; border-color:#e07a66; opacity:1}
+  .feedback{
+    margin-top:12px; max-width:620px; line-height:1.5; font-size:clamp(12px,1.8vw,15px);
+    background:rgba(255,255,255,.07); padding:10px 14px; border-radius:8px;
+  }
+  .keys{color:#cdb98f; font-size:clamp(11px,1.6vw,13px)}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="800" height="480"></canvas>
+
+  <!-- MENU -->
+  <div id="menu" class="overlay">
+    <h1>Parkour Gauchesco</h1>
+    <h2>Inspirado na vida e obra de João Simões Lopes Neto</h2>
+    <p>Atravesse 10 fases de campo, coxilhas e cidade. Cada fase termina com um quiz sobre o autor. Acertar rende uma <b>Bala</b> e pontos extras; errar mostra a explicação e segue para a próxima fase.</p>
+    <p class="keys"><b>Controles:</b> ← → ou A D para andar · Espaço, ↑ ou W para pular · X para atirar (remove um espinho à frente)</p>
+    <p><b>Vidas:</b> 3. Cair em abismos ou tocar espinhos custa uma vida, e você renasce no último checkpoint.</p>
+    <button id="btnStart" class="btn">Começar</button>
+  </div>
+
+  <!-- QUIZ -->
+  <div id="quiz" class="overlay hidden">
+    <h2 id="qTitle"></h2>
+    <p id="qText" style="font-size:clamp(14px,2.2vw,18px)"></p>
+    <div id="qOpts" class="opts"></div>
+    <div id="qFeedback" class="feedback hidden"></div>
+    <button id="qNext" class="btn hidden">Próximo nível ➜</button>
+  </div>
+
+  <!-- GAME OVER -->
+  <div id="gameover" class="overlay hidden">
+    <h1>Game Over</h1>
+    <p>Suas vidas acabaram, mas o pampa sempre espera mais uma travessia.</p>
+    <p>Pontuação final: <b id="goScore">0</b></p>
+    <button id="btnRestart" class="btn">Reiniciar</button>
+  </div>
+
+  <!-- VITÓRIA -->
+  <div id="win" class="overlay hidden">
+    <h1>Travessia concluída!</h1>
+    <p>Você atravessou as 10 fases e conheceu um pouco da obra de Simões Lopes Neto.</p>
+    <p>Pontuação final: <b id="winScore">0</b> · Balas restantes: <b id="winBullets">0</b></p>
+    <button id="btnWinRestart" class="btn">Jogar de novo</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   CONFIGURAÇÃO GERAL
+   ========================================================= */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const $ = id => document.getElementById(id);
+
+const W = 800, H = 480;          // resolução lógica do canvas
+const G = 0.55;                  // gravidade
+const JUMP = -11.2;              // força do pulo
+const JUMP_CUT = -3.2;           // corte do pulo ao soltar a tecla
+const MAX_FALL = 14;             // velocidade máxima de queda
+const SPEED = 4.2;               // velocidade horizontal
+const PW = 26, PH = 40;          // tamanho do jogador
+const STEP = 1000 / 60;          // passo fixo da física (60 FPS)
+const GROUND_Y = 400;            // topo do chão
+
+const LEVEL_NAMES = [
+  'Pelotas, Terra Natal', 'Campos do Sul', 'O Chasque', 'Coxilhas Verdes',
+  'Galpão Antigo', 'Passo do Rio', 'Negrinho do Pastoreio', 'Querência',
+  'Serenata do Pampa', 'Sol do Entardecer'
+];
+
+/* Perguntas sobre João Simões Lopes Neto (a = índice correto, e = explicação) */
+const QUIZ = [
+  { q:'Em qual cidade gaúcha nasceu João Simões Lopes Neto?',
+    o:['Porto Alegre','Pelotas','Bagé','Santa Maria'], a:1,
+    e:'Ele nasceu em Pelotas, cidade do sul do Rio Grande do Sul, onde também viveu grande parte da vida.' },
+  { q:'Em que ano ele nasceu?',
+    o:['1845','1865','1880','1899'], a:1,
+    e:'João Simões Lopes Neto nasceu em 1865.' },
+  { q:'Qual obra, publicada em 1912, reúne contos sobre o homem do campo gaúcho?',
+    o:['Dom Quixote','Contos Gauchescos','Os Sertões','Vidas Secas'], a:1,
+    e:'Contos Gauchescos (1912) retrata o gaúcho e o cotidiano do campo com linguagem regional.' },
+  { q:'Qual lenda da tradição gaúcha ganhou versão literária em Lendas do Sul?',
+    o:['Negrinho do Pastoreio','Saci-Pererê','Boitatá','Iara'], a:0,
+    e:'O Negrinho do Pastoreio é uma das lendas mais conhecidas da tradição gaúcha, registrada pelo autor.' },
+  { q:'Qual característica marca a linguagem das obras de Simões Lopes Neto?',
+    o:['Latim clássico','Linguagem regional gaúcha','Inglês arcaico','Português europeu padrão'], a:1,
+    e:'Ele registrou o falar do gaúcho, com palavras e expressões do Sul, valorizando a cultura popular.' },
+  { q:'Em que ano ele faleceu?',
+    o:['1900','1916','1925','1931'], a:1,
+    e:'Simões Lopes Neto faleceu em 1916, em Pelotas.' },
+  { q:'Em qual estado brasileiro fica Pelotas?',
+    o:['Santa Catarina','Paraná','Rio Grande do Sul','Bahia'], a:2,
+    e:'Pelotas fica no Rio Grande do Sul, o estado mais meridional do Brasil.' },
+  { q:'Qual movimento cultural valoriza as tradições do gaúcho e dialoga com essas obras?',
+    o:['Modernismo paulista','Tradicionalismo gaúcho','Barroco mineiro','Romantismo carioca'], a:1,
+    e:'O tradicionalismo gaúcho valoriza costumes, música e literatura do campo, temas presentes na obra do autor.' },
+  { q:'Em que formato literário estão os Contos Gauchescos?',
+    o:['Poesia épica','Teatro','Narrativas curtas em prosa','Crônica esportiva'], a:2,
+    e:'Os contos são narrativas em prosa, com personagens e cenas do campo gaúcho.' },
+  { q:'Além de escritor, em qual atividade Simões Lopes Neto também se destacou?',
+    o:['Engenharia ferroviária','Pintura de murais','Pesquisa do folclore e da cultura popular','Futebol profissional'], a:2,
+    e:'Ele também pesquisou o folclore e a cultura popular do Sul, o que alimentou suas narrativas.' }
+];
+
+/* =========================================================
+   GERADOR DE FASES (procedural e determinístico)
+   Cada fase usa uma semente fixa, então sempre é a mesma.
+   Os saltos são calibrados para serem possíveis.
+   ========================================================= */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function buildLevel(i){
+  const rnd = mulberry32(4242 + i * 97);
+  const diff = i / 9;                         // 0 (fácil) até 1 (difícil)
+  const plats = [{ x:0, y:GROUND_Y, w:420 }];
+  let x = 420, y = GROUND_Y;
+  const target = 2300 + i * 180;
+
+  while (x < target){
+    x += 55 + rnd() * (35 + diff * 50);       // abismo entre plataformas
+    let ny = rnd() < 0.4 ? GROUND_Y : 250 + rnd() * 110;
+    ny = Math.max(ny, y - 80);                // limita a altura do salto
+    const w = 110 + rnd() * (180 - diff * 50);
+    plats.push({ x, y:ny, w });
+    x += w; y = ny;
+  }
+  // Chão final com a bandeira de chegada
+  x += 55 + rnd() * 35;
+  plats.push({ x, y:GROUND_Y, w:260 });
+  const goalX = x + 200;
+
+  // Espessura: chão grosso, plataformas flutuantes finas
+  plats.forEach(pl => pl.h = pl.y >= GROUND_Y ? 80 : 22);
+
+  const hazards = [], coins = [], cps = [];
+  plats.forEach((pl, k) => {
+    if (k === 0) return;
+    // Checkpoint a cada 4 plataformas
+    if (k % 4 === 2) cps.push({ at:pl.x + 10, sx:pl.x + 20, sy:pl.y - PH, reached:false });
+    // Espinhos (mais frequentes nas fases finais)
+    if (pl.w >= 180 && rnd() < 0.15 + diff * 0.2){
+      const hx = pl.x + 90 + rnd() * (pl.w - 140);
+      hazards.push({ x:hx, y:pl.y - 12, w:26, h:12 });
+    }
+    // Moedas (pontos extras)
+    if (rnd() < 0.5) coins.push({ x:pl.x + pl.w / 2, y:pl.y - 50, taken:false });
+  });
+
+  return { name:LEVEL_NAMES[i], plats, hazards, coins, cps, goalX, len:goalX + 200 };
+}
+
+/* =========================================================
+   ESTADO DO JOGO
+   Estados: menu -> playing -> quiz -> playing ... -> win
+                                \-> gameover
+   ========================================================= */
+const keys = {};
+let state = 'menu';
+let levelIdx = 0, lives = 3, score = 0, bullets = 0;
+let level = null, p = null, cam = 0;
+let t = 0, banner = 0, bannerText = '', flash = 0, answered = false;
+const particles = [];
+
+const isLeft  = () => keys.ArrowLeft || keys.KeyA;
+const isRight = () => keys.ArrowRight || keys.KeyD;
+const isJump  = () => keys.Space || keys.ArrowUp || keys.KeyW;
+
+function makePlayer(x, y){
+  return { x, y, vx:0, vy:0, onGround:false, coyote:0, jumpBuf:0,
+           facing:1, invuln:0, cp:{ x, y } };
+}
+
+function overlap(ax, ay, aw, ah, bx, by, bw, bh){
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+function hit(a, b){ return overlap(a.x, a.y, a.w, a.h, b.x, b.y, b.w, b.h); }
+
+function burst(x, y, color, n){
+  for (let i = 0; i < n; i++){
+    particles.push({ x, y, vx:(Math.random() - 0.5) * 5, vy:(Math.random() - 0.9) * 5,
+                     life:30 + Math.random() * 20, color });
+  }
+}
+function updateParticles(){
+  for (let i = particles.length - 1; i >= 0; i--){
+    const q = particles[i];
+    q.x += q.vx; q.y += q.vy; q.vy += 0.2; q.life--;
+    if (q.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function toast(msg){ bannerText = msg; banner = 90; }
+
+function showOnly(id){
+  document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
+  if (id) $(id).classList.remove('hidden');
+}
+
+function loadLevel(i){
+  levelIdx = i;
+  level = buildLevel(i);
+  p = makePlayer(60, GROUND_Y - PH);
+  cam = 0;
+  particles.length = 0;
+  toast(`Fase ${i + 1}: ${LEVEL_NAMES[i]}`);
+  banner = 150;
+}
+
+function startGame(){
+  lives = 3; score = 0; bullets = 0;
+  loadLevel(0);
+  state = 'playing';
+  showOnly(null);
+}
+
+function gameOver(){
+  state = 'gameover';
+  $('goScore').textContent = score;
+  showOnly('gameover');
+}
+
+function showWin(){
+  state = 'win';
+  $('winScore').textContent = score;
+  $('winBullets').textContent = bullets;
+  showOnly('win');
+}
+
+/* Perde uma vida. Se ainda restar alguma, renasce no checkpoint. */
+function hurt(){
+  lives--;
+  flash = 20;
+  burst(p.x + PW / 2, p.y + PH / 2, '#b8432f', 16);
+  if (lives <= 0){ gameOver(); return; }
+  p.x = p.cp.x; p.y = p.cp.y;
+  p.vx = 0; p.vy = 0; p.invuln = 120;
+  toast(`Vidas restantes: ${lives}`);
+}
+
+/* =========================================================
+   QUIZ
+   ========================================================= */
+function finishLevel(){
+  state = 'quiz';
+  answered = false;
+  const q = QUIZ[levelIdx];
+  $('qTitle').textContent = `Fim da fase ${levelIdx + 1}: ${LEVEL_NAMES[levelIdx]}`;
+  $('qText').textContent = q.q;
+  const box = $('qOpts');
+  box.innerHTML = '';
+  q.o.forEach((txt, i) => {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    b.textContent = `${'ABCD'[i]}) ${txt}`;
+    b.onclick = () => { b.blur(); answer(i); };
+    box.appendChild(b);
+  });
+  $('qFeedback').classList.add('hidden');
+  $('qFeedback').innerHTML = '';
+  $('qNext').classList.add('hidden');
+  showOnly('quiz');
+}
+
+function answer(i){
+  if (state !== 'quiz' || answered) return;
+  answered = true;
+  const q = QUIZ[levelIdx];
+  const btns = [...$('qOpts').children];
+  btns.forEach(b => b.disabled = true);
+  btns[q.a].classList.add('correct');
+
+  let msg;
+  if (i === q.a){
+    bullets++;
+    score += 500;
+    msg = '✔ Correto! Você ganhou 1 Bala e +500 pontos.';
+  } else {
+    btns[i].classList.add('wrong');
+    msg = `✘ Resposta incorreta. A certa era a alternativa ${'ABCD'[q.a]}.`;
+  }
+  $('qFeedback').innerHTML = `<strong>${msg}</strong><br>${q.e}`;
+  $('qFeedback').classList.remove('hidden');
+  $('qNext').textContent = levelIdx === LEVEL_NAMES.length - 1 ? 'Ver resultado final ➜' : 'Próximo nível ➜';
+  $('qNext').classList.remove('hidden');
+}
+
+function nextLevel(){
+  if (state !== 'quiz' || !answered) return;
+  const next = levelIdx + 1;
+  if (next >= LEVEL_NAMES.length){ showWin(); return; }
+  loadLevel(next);
+  state = 'playing';
+  showOnly(null);
+}
+
+/* =========================================================
+   TIRO (item "Bala"): remove o espinho mais próximo à frente
+   ========================================================= */
+function shoot(){
+  if (state !== 'playing') return;
+  if (bullets <= 0){ toast('Sem balas! Acerte o quiz para ganhar uma.'); return; }
+  const L = level;
+  const px = p.x + PW;
+  let idx = -1, best = Infinity;
+  L.hazards.forEach((h, k) => {
+    const d = h.x - px;
+    if (d > -6 && d < 260 && d < best && Math.abs(h.y - (p.y + PH)) <= 40){
+      best = d; idx = k;
+    }
+  });
+  if (idx < 0){ toast('Nenhum espinho à frente.'); return; }
+  const h = L.hazards[idx];
+  L.hazards.splice(idx, 1);
+  bullets--;
+  burst(h.x + h.w / 2, h.y + h.h / 2, '#ffd54a', 18);
+  toast('Tiro certeiro! Espinho removido.');
+}
+
+/* =========================================================
+   ATUALIZAÇÃO (física, colisões e regras)
+   ========================================================= */
+function update(){
+  updateParticles();
+  if (flash > 0) flash--;
+  if (banner > 0) banner--;
+  if (state !== 'playing') return;
+  if (p.invuln > 0) p.invuln--;
+
+  // 1) Entrada horizontal
+  p.vx = (isRight() ? SPEED : 0) - (isLeft() ? SPEED : 0);
+  if (p.vx) p.facing = Math.sign(p.vx);
+
+  // 2) Pulo com "coyote time" (6 frames) e "jump buffer" (8 frames)
+  p.coyote = p.onGround ? 6 : Math.max(0, p.coyote - 1);
+  if (p.jumpBuf > 0) p.jumpBuf--;
+  if (p.jumpBuf > 0 && p.coyote > 0){
+    p.vy = JUMP; p.jumpBuf = 0; p.coyote = 0; p.onGround = false;
+  }
+  // Pulo de altura variável: soltar a tecla corta a subida
+  if (!isJump() && p.vy < JUMP_CUT) p.vy = JUMP_CUT;
+  p.vy = Math.min(p.vy + G, MAX_FALL);
+
+  // 3) Colisão no eixo X (separado para evitar atravessar paredes)
+  p.x += p.vx;
+  if (p.x < 0) p.x = 0;
+  for (const pl of level.plats){
+    if (overlap(p.x, p.y, PW, PH, pl.x, pl.y, pl.w, pl.h)){
+      if (p.vx > 0) p.x = pl.x - PW;
+      else if (p.vx < 0) p.x = pl.x + pl.w;
+    }
+  }
+
+  // 4) Colisão no eixo Y (pousar ou bater a cabeça)
+  p.y += p.vy;
+  p.onGround = false;
+  for (const pl of level.plats){
+    if (!overlap(p.x, p.y, PW, PH, pl.x, pl.y, pl.w, pl.h)) continue;
+    if (p.vy >= 0){ p.y = pl.y - PH; p.onGround = true; }
+    else { p.y = pl.y + pl.h; }
+    p.vy = 0;
+  }
+
+  // 5) Espinhos (AABB com margem para ser justo)
+  const pr = { x:p.x + 5, y:p.y + 6, w:PW - 10, h:PH - 6 };
+  if (p.invuln === 0){
+    for (const h of level.hazards){
+      if (hit(pr, h)){ hurt(); return; }
+    }
+  }
+
+  // 6) Moedas
+  for (const c of level.coins){
+    if (!c.taken && Math.abs(c.x - (p.x + PW / 2)) < 20 && Math.abs(c.y - (p.y + PH / 2)) < 24){
+      c.taken = true;
+      score += 10;
+      burst(c.x, c.y, '#ffd54a', 8);
+    }
+  }
+
+  // 7) Checkpoints (só ativa se estiver de pé)
+  for (const cp of level.cps){
+    if (!cp.reached && p.onGround && p.x >= cp.at){
+      cp.reached = true;
+      p.cp = { x:cp.sx, y:cp.sy };
+      banner = 60; bannerText = 'Checkpoint!';
+      burst(cp.sx + PW / 2, cp.sy + PH / 2, '#3f7d3a', 14);
+    }
+  }
+
+  // 8) Queda em abismo
+  if (p.y > H + 60){ hurt(); return; }
+
+  // 9) Chegada à bandeira -> quiz
+  if (p.x + PW >= level.goalX){ finishLevel(); return; }
+
+  // 10) Câmera acompanha o jogador
+  cam = Math.max(0, Math.min(level.len - W, p.x - W * 0.4));
+}
+
+/* =========================================================
+   DESENHO
+   ========================================================= */
+function hills(par, color, base, amp){
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 20){
+    const wx = x + cam * par;
+    ctx.lineTo(x, base + Math.sin(wx * 0.01) * amp + Math.sin(wx * 0.023) * amp * 0.5);
+  }
+  ctx.lineTo(W, H);
+  ctx.fill();
+}
+
+function drawBackground(){
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2d4a6b');
+  g.addColorStop(0.55, '#e8905a');
+  g.addColorStop(1, '#f5c77e');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,240,200,.9)';
+  ctx.beginPath(); ctx.arc(640, 110, 42, 0, Math.PI * 2); ctx.fill();
+  hills(0.15, '#8c6a8f', 300, 40);
+  hills(0.35, '#5f7a4a', 340, 30);
+}
+
+function drawPlatforms(){
+  for (const pl of level.plats){
+    ctx.fillStyle = pl.y >= GROUND_Y ? '#6e4b2e' : '#8a6a48';
+    ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+    ctx.fillStyle = '#4f8a34';
+    ctx.fillRect(pl.x, pl.y, pl.w, 6);
+    ctx.fillStyle = 'rgba(0,0,0,.15)';
+    for (let gx = pl.x + 8; gx < pl.x + pl.w; gx += 24) ctx.fillRect(gx, pl.y + 12, 3, 3);
+  }
+}
+
+function drawHazards(){
+  ctx.fillStyle = '#c9ced4';
+  ctx.strokeStyle = '#5b6168';
+  ctx.lineWidth = 1.5;
+  for (const h of level.hazards){
+    ctx.beginPath();
+    ctx.moveTo(h.x, h.y + h.h);
+    ctx.lineTo(h.x + h.w / 2, h.y);
+    ctx.lineTo(h.x + h.w, h.y + h.h);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+}
+
+function drawCheckpoints(){
+  for (const cp of level.cps){
+    const x = cp.sx + PW + 8, base = cp.sy + PH;
+    ctx.fillStyle = '#ddd';
+    ctx.fillRect(x, base - 34, 3, 34);
+    ctx.fillStyle = cp.reached ? '#3f7d3a' : '#8a8a8a';
+    ctx.beginPath();
+    ctx.moveTo(x + 3, base - 34);
+    ctx.lineTo(x + 16, base - 29);
+    ctx.lineTo(x + 3, base - 24);
+    ctx.fill();
+  }
+}
+
+function drawCoins(){
+  for (const c of level.coins){
+    if (c.taken) continue;
+    const bob = Math.sin(t * 0.1 + c.x) * 2;
+    ctx.fillStyle = '#ffd54a';
+    ctx.beginPath(); ctx.arc(c.x, c.y + bob, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#b8862b'; ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+
+function drawGoal(){
+  const gx = level.goalX;
+  const wave = Math.sin(t * 0.12) * 3;
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillRect(gx, 250, 4, 150);
+  ctx.fillStyle = '#b8432f';
+  ctx.beginPath();
+  ctx.moveTo(gx + 4, 252); ctx.lineTo(gx + 48, 252 + wave);
+  ctx.lineTo(gx + 48, 278 + wave); ctx.lineTo(gx + 4, 278);
+  ctx.fill();
+  ctx.fillStyle = '#3f7d3a';
+  ctx.beginPath();
+  ctx.moveTo(gx + 4, 278); ctx.lineTo(gx + 48, 278 + wave);
+  ctx.lineTo(gx + 48, 300 + wave); ctx.lineTo(gx + 4, 300);
+  ctx.fill();
+  ctx.fillStyle = '#fff3d6';
+  ctx.font = 'bold 12px Georgia, serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('CHEGADA', gx - 6, 242);
+}
+
+/* Gaúcho procedural: chapéu, poncho, cabeça e pernas animadas */
+function drawPlayer(){
+  if (p.invuln > 0 && Math.floor(t / 4) % 2 === 0) return;
+  const running = p.onGround && p.vx !== 0;
+  const step = running ? Math.sin(t * 0.45) * 6 : 0;
+
+  ctx.save();
+  ctx.translate(p.x + PW / 2, p.y);
+  ctx.scale(p.facing, 1);
+
+  // Pernas
+  ctx.strokeStyle = '#2b1d12';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(-4, 28); ctx.lineTo(-4 + step, PH);
+  ctx.moveTo(4, 28);  ctx.lineTo(4 - step, PH);
+  ctx.stroke();
+
+  // Poncho
+  ctx.fillStyle = '#a3372a';
+  ctx.beginPath();
+  ctx.moveTo(-9, 12); ctx.lineTo(9, 12); ctx.lineTo(13, 30); ctx.lineTo(-13, 30);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#e8b44a';
+  ctx.fillRect(-8, 20, 16, 2);
+
+  // Cabeça e olho
+  ctx.fillStyle = '#d9a77a';
+  ctx.beginPath(); ctx.arc(0, 9, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(2, 8, 2, 2);
+
+  // Chapéu (aba + copa)
+  ctx.fillStyle = '#2b1d12';
+  ctx.beginPath(); ctx.ellipse(0, 3, 11, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillRect(-5, -4, 10, 7);
+
+  ctx.restore();
+}
+
+function drawParticles(){
+  for (const q of particles){
+    ctx.globalAlpha = Math.max(0, q.life / 40);
+    ctx.fillStyle = q.color;
+    ctx.fillRect(q.x, q.y, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHUD(){
+  if (state === 'menu') return;
+  ctx.save();
+  ctx.font = 'bold 15px Georgia, serif';
+  ctx.shadowColor = 'rgba(0,0,0,.8)';
+  ctx.shadowBlur = 4;
+
+  ctx.fillStyle = '#fff3d6';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Fase ${Math.min(levelIdx + 1, 10)}/10 · ${LEVEL_NAMES[Math.min(levelIdx, 9)]}`, 14, 24);
+  ctx.textAlign = 'right';
+  ctx.fillText(`Pontos: ${score}`, W - 14, 24);
+
+  ctx.textAlign = 'left';
+  ctx.fillText('Vidas:', 14, 46);
+  ctx.fillStyle = '#ff6b5b';
+  ctx.fillText('♥ '.repeat(Math.max(0, lives)), 70, 46);
+  ctx.fillStyle = '#e8b44a';
+  ctx.fillText(`Balas: ${bullets}`, 150, 46);
+
+  // Barra de progresso
+  if (level && p){
+    const prog = Math.min(1, p.x / level.goalX);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0,0,0,.4)';
+    ctx.fillRect(14, H - 14, W - 28, 6);
+    ctx.fillStyle = '#e8b44a';
+    ctx.fillRect(14, H - 14, (W - 28) * prog, 6);
+  }
+
+  // Banner (nome da fase, checkpoint, avisos)
+  if (banner > 0 && bannerText){
+    ctx.globalAlpha = Math.min(1, banner / 30);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 26px Georgia, serif';
+    ctx.fillStyle = '#e8b44a';
+    ctx.fillText(bannerText, W / 2, H * 0.35);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+function draw(){
+  drawBackground();
+  if (level){
+    ctx.save();
+    ctx.translate(-Math.round(cam), 0);
+    drawPlatforms();
+    drawHazards();
+    drawCheckpoints();
+    drawCoins();
+    drawGoal();
+    if (p) drawPlayer();
+    drawParticles();
+    ctx.restore();
+  }
+  drawHUD();
+  if (flash > 0){
+    ctx.fillStyle = `rgba(200,30,20,${flash / 40})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* =========================================================
+   LOOP PRINCIPAL (requestAnimationFrame + passo fixo)
+   ========================================================= */
+let acc = 0, last = performance.now();
+function frame(now){
+  acc += Math.min(now - last, 200);
+  last = now;
+  while (acc >= STEP){
+    update();
+    t++;
+    acc -= STEP;
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================
+   ENTRADA E BOTÕES
+   ========================================================= */
+window.addEventListener('keydown', e => {
+  const c = e.code;
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(c)) e.preventDefault();
+  keys[c] = true;
+
+  if (state === 'playing'){
+    if ((c === 'Space' || c === 'ArrowUp' || c === 'KeyW') && !e.repeat) p.jumpBuf = 8;
+    if (c === 'KeyX' || c === 'KeyJ' || c === 'KeyZ') shoot();
+  }
+
+  if (state === 'quiz' && !answered){
+    const map = { KeyA:0, KeyB:1, KeyC:2, KeyD:3, Digit1:0, Digit2:1, Digit3:2, Digit4:3 };
+    if (c in map) answer(map[c]);
+  }
+
+  if (c === 'Enter'){
+    if (state === 'menu' || state === 'gameover' || state === 'win') startGame();
+    else if (state === 'quiz' && answered) nextLevel();
+  }
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+$('btnStart').onclick = startGame;
+$('btnRestart').onclick = startGame;
+$('btnWinRestart').onclick = startGame;
+$('qNext').onclick = nextLevel;
+document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => b.blur()));
+
+/* Inicialização: mostra o cenário da fase 1 atrás do menu */
+level = buildLevel(0);
+p = makePlayer(60, GROUND_Y - PH);
+showOnly('menu');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
