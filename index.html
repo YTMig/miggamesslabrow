@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#24170d">
-<title>Travessia do Pampa · Parkour com João Simões Lopes Neto</title>
+<title>Travessia do Pampa · Parkour com Simões Lopes Neto</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html,body{
@@ -77,6 +77,7 @@
   }
   .tbtn.small{width:62px;height:62px;font-size:20px}
   .tbtn.on{background:rgba(232,180,74,.55)}
+  .tbtn.dash{font-size:14px;letter-spacing:.5px;transition:opacity .15s}
 </style>
 </head>
 <body>
@@ -91,7 +92,7 @@
   </div>
   <div class="grp">
     <button class="tbtn small" data-k="use">🍬</button>
-    <button class="tbtn small" data-k="">»</button>
+    <button class="tbtn small dash" data-k="dash">DASH</button>
     <button class="tbtn" data-k="jump">⬆</button>
   </div>
 </div>
@@ -103,7 +104,8 @@
   <h1>Travessia do Pampa</h1>
   <h2>Parkour gauchesco com Simões Lopes Neto</h2>
   <p>Atravesse 10 fases inspiradas nas paisagens, lendas e personagens da obra do autor. Ao chegar ao fim de cada fase, responda a um quiz. Você ganha uma <b>balinha 🍬</b> se acertar a pergunta <b>e</b> passar a fase sem perder nenhuma vida.</p>
-  <p class="keys"><b>Teclado:</b> ← → ou A D andam · Espaço, ↑ ou W pulam (pulo duplo no ar) · Shift dá dash · X ou J come balinha (recupera 1 vida) · P pausa</p>
+  <p class="keys"><b>Teclado:</b> ← → ou A D andam · Espaço, ↑ ou W pulam (pulo duplo no ar) · <b>Q</b> dá dash · X ou J come balinha (recupera 1 vida) · P pausa</p>
+  <p class="keys"><b>Quiz:</b> clique na alternativa ou use as teclas 1, 2, 3 e 4</p>
   <p class="keys"><b>Celular:</b> use os botões na tela. Ao iniciar, o jogo tenta entrar em tela cheia.</p>
   <button id="btnStart" class="btn">Começar</button>
 </div>
@@ -163,6 +165,7 @@ const GROUND_Y = 400;          // topo do chão
 const STEP = 1000 / 60;        // passo fixo da física
 const MIN_VW = 600;            // menor largura visível do mundo
 const LIVES_MAX = 3;
+const QUIZ_DELAY = 700;        // ms até o quiz aceitar resposta
 
 /* Fases: nome e uma frase que liga cada fase à obra */
 const LEVELS = [
@@ -223,7 +226,7 @@ function mulberry32(a){
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
 }
-/* hash determinístico para variar grama e pedras sem aleatoriedade por frame */
+/* hash determinístico para variar grama, estrelas e árvores sem aleatoriedade por frame */
 function hash(n){ const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
 
 function overlap(ax, ay, aw, ah, bx, by, bw, bh){
@@ -279,9 +282,11 @@ let state = 'menu';
 let levelIdx = 0, lives = LIVES_MAX, score = 0, candies = 0, perfectPhases = 0;
 let phaseClean = true;          // true enquanto o jogador não perdeu vida nesta fase
 let answered = false;
+let quizReadyAt = 0;            // instante a partir do qual o quiz aceita respostas
 let level = null, p = null, cam = 0;
 let t = 0, banner = 0, bannerText = '', flash = 0;
 const particles = [];
+const dust = [];                // poeira do pampa em parallax
 
 /* Dimensões do canvas e escala (preenche a tela inteira) */
 let CW = 0, CH = 0, SCALE = 1, OFFY = 0, VW = 800;
@@ -296,12 +301,13 @@ function resize(){
   OFFY = (CH - H * SCALE) / 2;     // centraliza verticalmente
 }
 
-/* Entradas unificadas: teclado e botões de toque usam o mesmo mapa */
+/* Entradas unificadas: teclado e botões de toque usam o mesmo mapa.
+   Dash = tecla Q (no toque, o botão DASH). */
 const inp = { left:false, right:false, jump:false, dash:false, use:false };
 const KEYMAP = {
   ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
   Space:'jump', ArrowUp:'jump', KeyW:'jump',
-  ShiftLeft:'dash', KeyQ:'dash',
+  KeyQ:'dash',
   KeyX:'use', KeyJ:'use', KeyZ:'use'
 };
 
@@ -357,18 +363,21 @@ function startGame(){
   lives = LIVES_MAX; score = 0; candies = 0; perfectPhases = 0;
   loadLevel(0);
   state = 'playing';
+  resetInputs();
   showOnly(null);
   if (isTouch) tryFullscreen();
 }
 
 function gameOver(){
   state = 'gameover';
+  resetInputs();
   $('goScore').textContent = score;
   showOnly('gameover');
 }
 
 function showWin(){
   state = 'win';
+  resetInputs();
   $('winScore').textContent = score;
   $('winCandies').textContent = candies;
   $('winPerfect').textContent = perfectPhases;
@@ -384,6 +393,7 @@ function pauseGame(){
 function resumeGame(){
   if (state !== 'paused') return;
   state = 'playing';
+  resetInputs();
   showOnly(null);
 }
 
@@ -408,8 +418,9 @@ function eatCandy(){
   toast('Balinha! +1 vida');
 }
 
+/* Dash: ação instantânea, respeita a recarga */
 function startDash(){
-  if (p.dashCd > 0 || p.dashT > 0) return;
+  if (!p || p.dashCd > 0 || p.dashT > 0) return;
   p.dashT = DASH_FRAMES;
   p.dashCd = DASH_COOLDOWN;
   burst(p.x + PW / 2, p.y + PH / 2, '#f4ead5', 6);
@@ -421,6 +432,8 @@ function startDash(){
 function finishLevel(){
   state = 'quiz';
   answered = false;
+  quizReadyAt = performance.now() + QUIZ_DELAY;
+  resetInputs();
   const q = QUIZ[levelIdx];
   $('qTitle').textContent = `Fim da fase ${levelIdx + 1}: ${LEVELS[levelIdx].name}`;
   $('qText').textContent = q.q;
@@ -436,12 +449,12 @@ function finishLevel(){
   $('qFeedback').classList.add('hidden');
   $('qFeedback').innerHTML = '';
   $('qNext').classList.add('hidden');
-  resetInputs();
   showOnly('quiz');
 }
 
 function answer(i){
   if (state !== 'quiz' || answered) return;
+  if (performance.now() < quizReadyAt) return;   // ignora toques/teclas logo ao abrir
   answered = true;
   const q = QUIZ[levelIdx];
   const btns = [...$('qOpts').children];
@@ -474,6 +487,7 @@ function nextLevel(){
   if (next >= LEVELS.length){ showWin(); return; }
   loadLevel(next);
   state = 'playing';
+  resetInputs();
   showOnly(null);
 }
 
@@ -568,23 +582,40 @@ function update(){
 }
 
 /* =========================================================
-   DESENHO — cenário com camadas de parallax
+   DESENHO — cenário com camadas de parallax e iluminação
    ========================================================= */
 const CLOUDS = Array.from({ length:9 }, (_, i) => ({
   x: i * 160 + (i % 2) * 30, y: 60 + (i * 37) % 90, s: 0.9 + (i % 3) * 0.2
 }));
 
+const STARS = Array.from({ length:70 }, (_, i) => ({
+  x: hash(i * 3.1) * 1600, y: hash(i * 7.7) * 170, r: 0.5 + hash(i * 1.9) * 1.2,
+  ph: hash(i * 5.3) * Math.PI * 2
+}));
+
+for (let i = 0; i < 40; i++){
+  dust.push({ x: hash(i * 2.3) * 1200, y: 150 + hash(i * 4.1) * 280, s: 0.4 + hash(i) * 1.2 });
+}
+
 function drawCloud(x, y, s){
-  ctx.fillStyle = 'rgba(255,248,235,.85)';
+  ctx.fillStyle = 'rgba(255,246,230,.82)';
   ctx.beginPath();
   ctx.arc(x, y, 18 * s, 0, Math.PI * 2);
   ctx.arc(x + 22 * s, y - 8 * s, 22 * s, 0, Math.PI * 2);
   ctx.arc(x + 46 * s, y, 16 * s, 0, Math.PI * 2);
   ctx.fill();
+  // sombra inferior da nuvem
+  ctx.fillStyle = 'rgba(180,120,90,.18)';
+  ctx.beginPath();
+  ctx.ellipse(x + 22 * s, y + 10 * s, 36 * s, 6 * s, 0, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-function hillLayer(par, color, base, amp, seed){
-  ctx.fillStyle = color;
+function hillLayer(par, colorTop, colorBot, base, amp, seed){
+  const g = ctx.createLinearGradient(0, base - amp, 0, H + 60);
+  g.addColorStop(0, colorTop);
+  g.addColorStop(1, colorBot);
+  ctx.fillStyle = g;
   ctx.beginPath();
   ctx.moveTo(-20, H + 60);
   for (let x = -20; x <= VW + 20; x += 12){
@@ -597,41 +628,75 @@ function hillLayer(par, color, base, amp, seed){
   ctx.fill();
 }
 
-/* Árvores (umbuzeiros estilizados) repetidas com parallax */
-function trees(par, by){
+/* Árvores (umbuzeiros estilizados) com copa em duas tonalidades */
+function trees(par, by, scale, dark){
   const step = 170;
   const first = Math.floor((cam * par) / step) - 1;
   const n = Math.ceil(VW / step) + 3;
   for (let k = first; k < first + n; k++){
-    const h = 0.6 + hash(k) * 0.5;
+    const h = (0.6 + hash(k) * 0.5) * scale;
     const sx = k * step - cam * par + hash(k + 9) * 30;
-    ctx.fillStyle = '#3d4f2e';
+    ctx.fillStyle = dark ? '#2a2a1e' : '#3d4f2e';
     ctx.fillRect(sx - 3, by - 30 * h, 6, 30 * h);
-    ctx.fillStyle = '#2f4a2a';
+    ctx.fillStyle = dark ? '#1f2a1a' : '#2f4a2a';
     ctx.beginPath();
     ctx.ellipse(sx, by - 38 * h, 18 * h, 20 * h, 0, 0, Math.PI * 2);
     ctx.fill();
+    if (!dark){
+      ctx.fillStyle = 'rgba(160,200,110,.25)';
+      ctx.beginPath();
+      ctx.ellipse(sx - 5 * h, by - 44 * h, 8 * h, 9 * h, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/* Casinha de estância ao longe, repetida com parallax */
+function ranch(par, by){
+  const step = 620;
+  const first = Math.floor((cam * par) / step) - 1;
+  for (let k = first; k < first + Math.ceil(VW / step) + 3; k++){
+    const sx = k * step + 180 - cam * par;
+    ctx.fillStyle = '#2d2016';
+    ctx.fillRect(sx, by - 26, 46, 26);
+    ctx.beginPath();
+    ctx.moveTo(sx - 4, by - 26); ctx.lineTo(sx + 23, by - 42); ctx.lineTo(sx + 50, by - 26);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,200,110,.7)';            // janela acesa
+    ctx.fillRect(sx + 8, by - 18, 8, 8);
+    ctx.fillRect(sx + 30, by - 18, 8, 8);
+    ctx.fillStyle = '#2d2016';
+    ctx.fillRect(sx + 36, by - 58, 4, 16);             // chaminé
   }
 }
 
 function drawSky(){
   // Céu: do azul profundo ao laranja do entardecer
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#1d3557');
-  g.addColorStop(0.42, '#3f6a8a');
-  g.addColorStop(0.75, '#e8905a');
+  g.addColorStop(0, '#152a47');
+  g.addColorStop(0.3, '#2f5778');
+  g.addColorStop(0.58, '#d9785a');
+  g.addColorStop(0.8, '#f0a866');
   g.addColorStop(1, '#f8cf86');
   ctx.fillStyle = g;
   ctx.fillRect(-100, -400, VW + 200, H + 800);
 
+  // Estrelas piscando na parte alta do céu
+  for (const s of STARS){
+    const tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 0.05 + s.ph));
+    const x = ((s.x - cam * 0.02) % 1600 + 1600) % 1600 - 100;
+    ctx.fillStyle = `rgba(255,250,235,${0.8 * tw})`;
+    ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+  }
+
   // Sol com halo
-  const sx = VW * 0.72 - cam * 0.02, sy = 105;
-  const sg = ctx.createRadialGradient(sx, sy, 10, sx, sy, 160);
+  const sx = VW * 0.72 - cam * 0.02, sy = 120;
+  const sg = ctx.createRadialGradient(sx, sy, 10, sx, sy, 190);
   sg.addColorStop(0, 'rgba(255,245,210,1)');
-  sg.addColorStop(0.25, 'rgba(255,220,150,.55)');
+  sg.addColorStop(0.22, 'rgba(255,220,150,.5)');
   sg.addColorStop(1, 'rgba(255,200,120,0)');
   ctx.fillStyle = sg;
-  ctx.fillRect(sx - 160, sy - 160, 320, 320);
+  ctx.fillRect(sx - 190, sy - 190, 380, 380);
   ctx.fillStyle = '#fff6dc';
   ctx.beginPath(); ctx.arc(sx, sy, 36, 0, Math.PI * 2); ctx.fill();
 
@@ -642,60 +707,83 @@ function drawSky(){
     drawCloud(x, c.y, c.s);
   }
 
-  // Coxilhas em três camadas
-  hillLayer(0.15, '#8c6a8f', 300, 36, 0.5);
-  hillLayer(0.3, '#5f7a4a', 340, 28, 2.1);
-  trees(0.3, 352);
-  hillLayer(0.55, '#4a6b3a', 380, 16, 4.0);
+  // Serra distante em tom azulado
+  hillLayer(0.08, '#6b6f94', '#4a5070', 265, 22, 1.3);
+
+  // Coxilhas em camadas, cada uma mais escura e mais perto
+  hillLayer(0.15, '#8c6a8f', '#5e4a6b', 300, 36, 0.5);
+  ranch(0.2, 330);
+  hillLayer(0.3, '#6f8a52', '#4d6a3a', 340, 28, 2.1);
+  trees(0.3, 352, 1, true);
+  hillLayer(0.55, '#5a7d42', '#3b5a2c', 380, 16, 4.0);
+  trees(0.55, 392, 0.8, false);
 }
 
-/* Chão com grama, terra e pedrinhas */
+/* Chão com grama que balança, terra e pedrinhas */
 function drawGround(pl){
   const g = ctx.createLinearGradient(0, pl.y, 0, pl.y + pl.h);
   g.addColorStop(0, '#7a5232');
-  g.addColorStop(1, '#4a2f1b');
+  g.addColorStop(1, '#3f2615');
   ctx.fillStyle = g;
   ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
 
+  // Camada de terra mais clara logo abaixo da grama
+  ctx.fillStyle = 'rgba(180,130,80,.25)';
+  ctx.fillRect(pl.x, pl.y + 10, pl.w, 3);
+
+  // Topo de grama
   ctx.fillStyle = '#5c9a3a';
   ctx.fillRect(pl.x, pl.y, pl.w, 8);
   ctx.fillStyle = '#7bb74e';
   ctx.fillRect(pl.x, pl.y, pl.w, 3);
 
-  ctx.fillStyle = '#4a8230';
-  for (let gx = pl.x + 4; gx < pl.x + pl.w; gx += 11){
-    const h = 3 + hash(gx) * 5;
+  // Lâminas de grama balançando com o vento
+  for (let gx = pl.x + 4; gx < pl.x + pl.w; gx += 9){
+    const h = 3 + hash(gx) * 6;
+    const sway = Math.sin(t * 0.06 + gx * 0.2) * 1.6;
+    ctx.fillStyle = hash(gx + 3) > 0.5 ? '#4a8230' : '#5f9a3c';
     ctx.beginPath();
     ctx.moveTo(gx, pl.y + 1);
-    ctx.lineTo(gx + 2, pl.y - h);
-    ctx.lineTo(gx + 4, pl.y + 1);
+    ctx.quadraticCurveTo(gx + sway * 0.4, pl.y - h * 0.5, gx + sway, pl.y - h);
+    ctx.quadraticCurveTo(gx + 2 + sway * 0.4, pl.y - h * 0.5, gx + 3, pl.y + 1);
     ctx.fill();
   }
 
+  // Pedrinhas e terra escura
   ctx.fillStyle = 'rgba(0,0,0,.25)';
   for (let gx = pl.x + 10; gx < pl.x + pl.w; gx += 23){
     ctx.beginPath();
     ctx.arc(gx + hash(gx) * 8, pl.y + 30 + hash(gx + 1) * 40, 2 + hash(gx + 2) * 2, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.fillStyle = 'rgba(200,180,150,.18)';
+  for (let gx = pl.x + 30; gx < pl.x + pl.w; gx += 47){
+    ctx.beginPath();
+    ctx.arc(gx + hash(gx + 5) * 10, pl.y + 20 + hash(gx + 6) * 30, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
-/* Tábua de madeira suspensa, com pilares e pregos */
+/* Tábua de madeira suspensa, com pilares, veios e pregos */
 function drawPlank(pl){
-  ctx.fillStyle = '#4b3320';
+  ctx.fillStyle = '#3a2615';
   ctx.fillRect(pl.x + 6, pl.y + pl.h, 6, 14);
   ctx.fillRect(pl.x + pl.w - 12, pl.y + pl.h, 6, 14);
 
   const g = ctx.createLinearGradient(0, pl.y, 0, pl.y + pl.h);
-  g.addColorStop(0, '#a77a4a');
-  g.addColorStop(1, '#70492a');
+  g.addColorStop(0, '#b68652');
+  g.addColorStop(1, '#6b4527');
   ctx.fillStyle = g;
   ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
 
-  ctx.fillStyle = 'rgba(60,35,15,.35)';
+  // Veios da madeira
+  ctx.fillStyle = 'rgba(60,35,15,.3)';
   for (let gx = pl.x + 18; gx < pl.x + pl.w; gx += 34){
     ctx.fillRect(gx, pl.y + 4, 2, pl.h - 8);
   }
+  // Brilho no topo e grama musgosa
+  ctx.fillStyle = 'rgba(255,230,180,.22)';
+  ctx.fillRect(pl.x, pl.y + 2, pl.w, 2);
   ctx.fillStyle = '#5b8f3a';
   ctx.fillRect(pl.x, pl.y, pl.w, 4);
   ctx.fillStyle = '#2e1d10';
@@ -711,7 +799,7 @@ function drawPlatforms(){
   }
 }
 
-/* Espinhos metálicos */
+/* Espinhos metálicos com brilho */
 function drawHazards(){
   for (const hz of level.hazards){
     if (hz.x < cam - 40 || hz.x > cam + VW + 40) continue;
@@ -750,7 +838,7 @@ function drawCheckpoints(){
   }
 }
 
-/* Moedas com brilho */
+/* Moedas com brilho que pulsa */
 function drawCoins(){
   for (const c of level.coins){
     if (c.taken) continue;
@@ -785,6 +873,15 @@ function drawGoal(){
   ctx.fillText('CHEGADA', gx - 6, 230);
 }
 
+/* Sombra do jogador no chão */
+function drawShadow(){
+  if (!p.onGround) return;
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.beginPath();
+  ctx.ellipse(p.x + PW / 2, p.y + PH + 1, 13, 3.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /* Desenha o gaúcho com origem no topo da cabeça (cx = x do mundo) */
 function drawBody(cx, top, k, air){
   ctx.save();
@@ -804,7 +901,7 @@ function drawBody(cx, top, k, air){
   ctx.fillRect(-5 + l1, 35, 8, 5);
   ctx.fillRect(-1 + l2, 35, 8, 5);
 
-  // Poncho com gradiente e listra dourada
+  // Poncho com gradiente, franja e listra dourada
   const pg = ctx.createLinearGradient(0, 12, 0, 30);
   pg.addColorStop(0, '#c4482f');
   pg.addColorStop(1, '#7e2618');
@@ -814,10 +911,14 @@ function drawBody(cx, top, k, air){
   ctx.closePath(); ctx.fill();
   ctx.fillStyle = '#e8b44a';
   ctx.fillRect(-9, 22, 18, 2);
+  ctx.fillStyle = 'rgba(255,220,180,.25)';
+  ctx.fillRect(-6, 13, 4, 6);
 
   // Lenço no pescoço
   ctx.fillStyle = '#e0572f';
-  ctx.fillRect(-5, 10, 10, 3);
+  ctx.beginPath();
+  ctx.moveTo(-5, 10); ctx.lineTo(5, 10); ctx.lineTo(0, 15);
+  ctx.closePath(); ctx.fill();
 
   // Cabeça, olho e bigode
   ctx.fillStyle = '#d9a77a';
@@ -849,6 +950,16 @@ function drawPlayer(){
     ctx.globalAlpha = 1;
   }
   drawBody(p.x, p.y, k, air);
+}
+
+/* Poeira flutuando, com parallax leve */
+function drawDust(){
+  ctx.fillStyle = 'rgba(255,230,190,.35)';
+  for (const d of dust){
+    const x = ((d.x - cam * 0.5 + t * 0.2 * d.s) % 1200 + 1200) % 1200 - 100;
+    const y = d.y + Math.sin(t * 0.02 + d.x) * 6;
+    ctx.beginPath(); ctx.arc(x, y, d.s, 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 function drawParticles(){
@@ -928,6 +1039,24 @@ function drawHUD(){
   ctx.restore();
 }
 
+/* Vinheta: escurece as bordas para dar profundidade */
+function drawVignette(){
+  const g = ctx.createRadialGradient(CW / 2, CH / 2, Math.min(CW, CH) * 0.35, CW / 2, CH / 2, Math.max(CW, CH) * 0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(10,5,2,.45)');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, CW, CH);
+}
+
+/* Botão DASH apagado durante a recarga */
+const dashBtn = document.querySelector('.tbtn[data-k="dash"]');
+function updateDashButton(){
+  if (!dashBtn) return;
+  const ready = p && p.dashCd === 0 && p.dashT === 0;
+  dashBtn.style.opacity = ready ? 1 : 0.4;
+}
+
 function draw(){
   // Limpa a tela inteira (inclusive faixas laterais, se existirem)
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -945,15 +1074,18 @@ function draw(){
     drawCheckpoints();
     drawCoins();
     drawGoal();
-    if (p) drawPlayer();
+    if (p){ drawShadow(); drawPlayer(); }
     drawParticles();
     ctx.restore();
+    drawDust();
   }
   drawHUD();
   if (flash > 0){
     ctx.fillStyle = `rgba(200,30,20,${flash / 45})`;
     ctx.fillRect(-200, -200, VW + 400, H + 400);
   }
+  drawVignette();
+  updateDashButton();
 }
 
 /* =========================================================
@@ -981,13 +1113,14 @@ function frame(now){
 const isTouch = matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints > 0;
 if (isTouch) document.body.classList.add('touch');
 
+/* Ações instantâneas (dash, balinha) disparam a cada toque.
+   Ações contínuas (andar, pular) ficam ativas enquanto o botão está pressionado. */
 function press(a){
-  if (inp[a]) return;                 // evita repetição do teclado
-  inp[a] = true;
   if (state !== 'playing') return;
-  if (a === 'jump') p.jumpBuf = 8;
-  else if (a === 'dash') startDash();
-  else if (a === 'use') eatCandy();
+  if (a === 'dash'){ startDash(); return; }
+  if (a === 'use'){ eatCandy(); return; }
+  if (a === 'jump' && !inp.jump) p.jumpBuf = 8;
+  inp[a] = true;
 }
 function release(a){ inp[a] = false; }
 function resetInputs(){ for (const k in inp) inp[k] = false; }
@@ -996,14 +1129,16 @@ window.addEventListener('keydown', e => {
   const c = e.code;
   if (KEYMAP[c] || c === 'Space') e.preventDefault();
 
-  // No quiz, as teclas A/B/C/D e 1 a 4 respondem
+  // Quiz: só aceita 1 a 4, e ignora repetições automáticas da tecla
   if (state === 'quiz'){
-    const map = { KeyA:0, KeyB:1, KeyC:2, KeyD:3, Digit1:0, Digit2:1, Digit3:2, Digit4:3 };
+    if (e.repeat) return;
+    const map = { Digit1:0, Digit2:1, Digit3:2, Digit4:3 };
     if (!answered && c in map) answer(map[c]);
-    if (answered && (c === 'Enter' || c === 'Space')){ e.preventDefault(); nextLevel(); }
+    if (answered && c === 'Enter') nextLevel();
     return;
   }
 
+  if (e.repeat && KEYMAP[c]) return;
   if (KEYMAP[c]){ press(KEYMAP[c]); return; }
 
   if (c === 'KeyP' || c === 'Escape'){
@@ -1024,15 +1159,23 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden){ resetInputs(); pauseGame(); }
 });
 
-/* Botões de toque: pressionar e soltar */
+/* Botões de toque: captura o ponteiro para não perder o "soltar" */
 document.querySelectorAll('.tbtn').forEach(b => {
   const k = b.dataset.k;
-  const down = e => { e.preventDefault(); b.classList.add('on'); press(k); };
-  const up = e => { e.preventDefault(); b.classList.remove('on'); release(k); };
-  b.addEventListener('pointerdown', down);
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    b.setPointerCapture(e.pointerId);
+    b.classList.add('on');
+    press(k);
+  });
+  const up = e => {
+    e.preventDefault();
+    b.classList.remove('on');
+    release(k);
+  };
   b.addEventListener('pointerup', up);
   b.addEventListener('pointercancel', up);
-  b.addEventListener('pointerleave', up);
+  b.addEventListener('lostpointercapture', up);
 });
 
 $('btnStart').onclick = startGame;
