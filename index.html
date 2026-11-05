@@ -73,11 +73,11 @@
     pointer-events:auto;width:76px;height:76px;border-radius:50%;
     background:rgba(255,240,200,.16);border:2px solid rgba(255,240,200,.45);color:#fff;
     font:bold 24px Georgia,serif;display:flex;align-items:center;justify-content:center;
-    touch-action:none;
+    touch-action:none;transition:opacity .15s;
   }
   .tbtn.small{width:62px;height:62px;font-size:20px}
+  .tbtn.dash{font-size:14px;letter-spacing:.5px}
   .tbtn.on{background:rgba(232,180,74,.55)}
-  .tbtn.dash{font-size:14px;letter-spacing:.5px;transition:opacity .15s}
 </style>
 </head>
 <body>
@@ -91,7 +91,6 @@
     <button class="tbtn" data-k="right">▶</button>
   </div>
   <div class="grp">
-    <button class="tbtn small" data-k="use">🍬</button>
     <button class="tbtn small dash" data-k="dash">DASH</button>
     <button class="tbtn" data-k="jump">⬆</button>
   </div>
@@ -103,8 +102,8 @@
 <div id="menu" class="overlay">
   <h1>Travessia do Pampa</h1>
   <h2>Parkour gauchesco com Simões Lopes Neto</h2>
-  <p>Atravesse 10 fases inspiradas nas paisagens, lendas e personagens da obra do autor. Ao chegar ao fim de cada fase, responda a um quiz. Você ganha uma <b>balinha 🍬</b> se acertar a pergunta <b>e</b> passar a fase sem perder nenhuma vida.</p>
-  <p class="keys"><b>Teclado:</b> ← → ou A D andam · Espaço, ↑ ou W pulam (pulo duplo no ar) · <b>Q</b> dá dash · X ou J come balinha (recupera 1 vida) · P pausa</p>
+  <p>Atravesse 10 fases inspiradas nas paisagens, lendas e personagens da obra do autor. Ao chegar ao fim de cada fase, responda a um quiz. Se você acertar as <b>10 perguntas</b>, ganha <b>1 doce 🍬 de verdade</b> no final.</p>
+  <p class="keys"><b>Teclado:</b> ← → ou A D andam · Espaço, ↑ ou W pulam (pulo duplo no ar) · <b>Q</b> dá dash · P pausa</p>
   <p class="keys"><b>Quiz:</b> clique na alternativa ou use as teclas 1, 2, 3 e 4</p>
   <p class="keys"><b>Celular:</b> use os botões na tela. Ao iniciar, o jogo tenta entrar em tela cheia.</p>
   <button id="btnStart" class="btn">Começar</button>
@@ -139,7 +138,8 @@
   <h1>Travessia concluída!</h1>
   <p>Você atravessou as 10 fases e conheceu um pouco da obra de Simões Lopes Neto.</p>
   <p>Pontuação final: <b id="winScore">0</b></p>
-  <p>Balinhas ganhas: <b id="winCandies">0</b> · Fases sem perder vida: <b id="winPerfect">0</b> de 10</p>
+  <p>Perguntas certas: <b id="winCorrect">0</b> de 10</p>
+  <p id="winDoce"></p>
   <button id="btnWinRestart" class="btn">Jogar de novo</button>
 </div>
 
@@ -279,8 +279,7 @@ function buildLevel(i){
                     -> gameover
    ========================================================= */
 let state = 'menu';
-let levelIdx = 0, lives = LIVES_MAX, score = 0, candies = 0, perfectPhases = 0;
-let phaseClean = true;          // true enquanto o jogador não perdeu vida nesta fase
+let levelIdx = 0, lives = LIVES_MAX, score = 0, correctCount = 0;
 let answered = false;
 let quizReadyAt = 0;            // instante a partir do qual o quiz aceita respostas
 let level = null, p = null, cam = 0;
@@ -301,14 +300,13 @@ function resize(){
   OFFY = (CH - H * SCALE) / 2;     // centraliza verticalmente
 }
 
-/* Entradas unificadas: teclado e botões de toque usam o mesmo mapa.
+/* Entradas: teclado e botões de toque usam o mesmo mapa.
    Dash = tecla Q (no toque, o botão DASH). */
-const inp = { left:false, right:false, jump:false, dash:false, use:false };
+const inp = { left:false, right:false, jump:false, dash:false };
 const KEYMAP = {
   ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
   Space:'jump', ArrowUp:'jump', KeyW:'jump',
-  KeyQ:'dash',
-  KeyX:'use', KeyJ:'use', KeyZ:'use'
+  KeyQ:'dash'
 };
 
 function makePlayer(x, y){
@@ -342,7 +340,6 @@ function loadLevel(i){
   level = buildLevel(i);
   p = makePlayer(60, GROUND_Y - PH);
   cam = 0;
-  phaseClean = true;
   particles.length = 0;
   bannerText = `Fase ${i + 1}: ${LEVELS[i].name}`;
   banner = 170;
@@ -360,7 +357,7 @@ function toggleFullscreen(){
 }
 
 function startGame(){
-  lives = LIVES_MAX; score = 0; candies = 0; perfectPhases = 0;
+  lives = LIVES_MAX; score = 0; correctCount = 0;
   loadLevel(0);
   state = 'playing';
   resetInputs();
@@ -378,9 +375,12 @@ function gameOver(){
 function showWin(){
   state = 'win';
   resetInputs();
+  const perfect = correctCount === LEVELS.length;   // doce só se acertou as 10
   $('winScore').textContent = score;
-  $('winCandies').textContent = candies;
-  $('winPerfect').textContent = perfectPhases;
+  $('winCorrect').textContent = correctCount;
+  $('winDoce').textContent = perfect
+    ? '🍬 Você acertou tudo e ganhou 1 doce de verdade!'
+    : 'Não foi dessa vez. Para ganhar o doce, acerte todas as 10 perguntas.';
   showOnly('win');
 }
 
@@ -400,22 +400,12 @@ function resumeGame(){
 /* Perde uma vida: renasce no checkpoint ou termina o jogo */
 function hurt(){
   lives--;
-  phaseClean = false;
   flash = 22;
   burst(p.x + PW / 2, p.y + PH / 2, '#b8432f', 18);
   if (lives <= 0){ gameOver(); return; }
   p.x = p.cp.x; p.y = p.cp.y;
   p.vx = 0; p.vy = 0; p.invuln = 120; p.dashT = 0;
   toast(`Você perdeu uma vida · restam ${lives}`);
-}
-
-/* Balinha: recupera uma vida (só se tiver balinha e vidas abaixo do máximo) */
-function eatCandy(){
-  if (candies <= 0){ toast('Sem balinhas. Acerte o quiz sem perder vidas!'); return; }
-  if (lives >= LIVES_MAX){ toast('Suas vidas já estão cheias.'); return; }
-  candies--; lives++;
-  burst(p.x + PW / 2, p.y, '#ff6b8a', 14);
-  toast('Balinha! +1 vida');
 }
 
 /* Dash: ação instantânea, respeita a recarga */
@@ -463,17 +453,12 @@ function answer(i){
 
   let msg;
   if (i === q.a){
+    correctCount++;
     score += 500;
-    if (phaseClean){
-      candies++;
-      perfectPhases++;
-      msg = '✔ Correto, e você passou a fase sem perder nenhuma vida! Ganhou 1 balinha 🍬 e +500 pontos.';
-    } else {
-      msg = '✔ Correto! Mas você perdeu vida nesta fase, então não ganhou a balinha. Ainda assim, +500 pontos.';
-    }
+    msg = `✔ Correto! Você já acertou ${correctCount} de ${levelIdx + 1} perguntas.`;
   } else {
     btns[i].classList.add('wrong');
-    msg = `✘ Resposta incorreta. A certa era a alternativa ${'ABCD'[q.a]}.`;
+    msg = `✘ Resposta incorreta. A certa era a alternativa ${'ABCD'[q.a]}. Para ganhar o doce, precisa acertar todas.`;
   }
   $('qFeedback').innerHTML = `<strong>${msg}</strong><br>${q.e}`;
   $('qFeedback').classList.remove('hidden');
@@ -982,17 +967,6 @@ function heart(x, y, s){
   ctx.closePath();
 }
 
-/* Balinha (ícone desenhado) */
-function candyIcon(x, y){
-  ctx.fillStyle = '#ff6b8a';
-  ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(x - 2, y - 7, 2, 14);
-  ctx.fillStyle = '#ff6b8a';
-  ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x - 13, y - 5); ctx.lineTo(x - 13, y + 5); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(x + 7, y); ctx.lineTo(x + 13, y - 5); ctx.lineTo(x + 13, y + 5); ctx.fill();
-}
-
 function drawHUD(){
   if (!level) return;
   ctx.save();
@@ -1012,11 +986,11 @@ function drawHUD(){
     heart(26 + i * 24, 34, 16);
     ctx.fill();
   }
-  // Balinhas
-  candyIcon(26 + LIVES_MAX * 24 + 14, 42);
+
+  // Progresso de acertos do quiz
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff3d6';
-  ctx.fillText(`x${candies}`, 26 + LIVES_MAX * 24 + 28, 48);
+  ctx.fillText(`Acertos: ${correctCount}/${LEVELS.length}`, 26 + LIVES_MAX * 24 + 14, 48);
 
   // Barra de progresso
   ctx.shadowBlur = 0;
@@ -1113,12 +1087,11 @@ function frame(now){
 const isTouch = matchMedia('(pointer:coarse)').matches || navigator.maxTouchPoints > 0;
 if (isTouch) document.body.classList.add('touch');
 
-/* Ações instantâneas (dash, balinha) disparam a cada toque.
-   Ações contínuas (andar, pular) ficam ativas enquanto o botão está pressionado. */
+/* Dash é ação instantânea (dispara a cada toque/tecla).
+   Andar e pular são contínuos (ativos enquanto pressionados). */
 function press(a){
   if (state !== 'playing') return;
   if (a === 'dash'){ startDash(); return; }
-  if (a === 'use'){ eatCandy(); return; }
   if (a === 'jump' && !inp.jump) p.jumpBuf = 8;
   inp[a] = true;
 }
@@ -1129,7 +1102,7 @@ window.addEventListener('keydown', e => {
   const c = e.code;
   if (KEYMAP[c] || c === 'Space') e.preventDefault();
 
-  // Quiz: só aceita 1 a 4, e ignora repetições automáticas da tecla
+  // Quiz: só aceita 1 a 4 e Enter para avançar; ignora repetições automáticas
   if (state === 'quiz'){
     if (e.repeat) return;
     const map = { Digit1:0, Digit2:1, Digit3:2, Digit4:3 };
