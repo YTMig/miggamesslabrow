@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#24170d">
-<title>Travessia do Pampa · Parkour com Simões Lopes Neto</title>
+<title>Parkour com João Simões Lopes Neto</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html,body{
@@ -48,10 +48,17 @@
     background:rgba(255,255,255,.07);padding:12px 16px;border-radius:10px;
   }
 
-  #fsBtn{
-    position:fixed;top:8px;right:8px;z-index:20;background:rgba(0,0,0,.45);color:#fff3d6;
+  /* Barra de botões no canto superior direito */
+  .topBtn{
+    position:fixed;top:8px;z-index:20;background:rgba(0,0,0,.45);color:#fff3d6;
     border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:6px 10px;
-    font:14px Georgia,serif;cursor:pointer;
+    font:14px Georgia,serif;cursor:pointer;white-space:nowrap;
+  }
+  #fsBtn{right:8px}
+  #gfxBtn{right:130px}
+  #fpsBox{
+    position:fixed;top:44px;right:8px;z-index:20;color:#fff3d6;background:rgba(0,0,0,.35);
+    padding:2px 8px;border-radius:6px;font:12px monospace;pointer-events:none;
   }
 
   /* Aviso para girar o celular */
@@ -83,7 +90,9 @@
 <body>
 
 <canvas id="game"></canvas>
-<button id="fsBtn">⛶ Tela cheia</button>
+<button id="fsBtn" class="topBtn">⛶ Tela cheia</button>
+<button id="gfxBtn" class="topBtn">Gráficos: Baixo</button>
+<div id="fpsBox">FPS: --</div>
 
 <div id="touch">
   <div class="grp">
@@ -167,6 +176,20 @@ const MIN_VW = 600;            // menor largura visível do mundo
 const LIVES_MAX = 3;
 const QUIZ_DELAY = 700;        // ms até o quiz aceitar resposta
 
+/* Qualidade gráfica: começa sempre em "low" */
+const QUALITY = {
+  low:    { label:'Baixo',  dpr:1,   stars:0,  clouds:4, dust:0,  vignette:false, shadow:false, grass:14, burst:0.5 },
+  medium: { label:'Médio',  dpr:1.5, stars:35, clouds:9, dust:15, vignette:true,  shadow:true,  grass:9,  burst:1 },
+  high:   { label:'Alto',   dpr:2,   stars:70, clouds:9, dust:40, vignette:true,  shadow:true,  grass:7,  burst:1 }
+};
+const QORDER = ['low', 'medium', 'high'];
+let quality = 'low';
+const Q = () => QUALITY[quality];
+
+/* Frase secreta (digitada no teclado) */
+const SECRET = 'bentoguloso';
+let secretBuf = '';
+
 /* Fases: nome e uma frase que liga cada fase à obra */
 const LEVELS = [
   { name:'Pelotas, terra natal', info:'Os primeiros passos pela cidade onde o autor nasceu e viveu.' },
@@ -183,36 +206,36 @@ const LEVELS = [
 
 /* Perguntas: q = pergunta, o = alternativas, a = índice correto, e = explicação */
 const QUIZ = [
-  { q:'Em qual cidade gaúcha nasceu João Simões Lopes Neto?',
-    o:['Porto Alegre','Pelotas','Bagé','Santa Maria'], a:1,
-    e:'Ele nasceu em Pelotas, no sul do Rio Grande do Sul, cidade onde viveu grande parte da vida.' },
-  { q:'Em que ano ele nasceu?',
-    o:['1845','1865','1880','1899'], a:1,
-    e:'João Simões Lopes Neto nasceu em 1865.' },
   { q:'Qual obra, publicada em 1912, reúne contos sobre o homem do campo gaúcho?',
     o:['Dom Quixote','Contos Gauchescos','Os Sertões','Vidas Secas'], a:1,
     e:'Contos Gauchescos (1912) retrata o gaúcho e o cotidiano do campo com linguagem regional.' },
-  { q:'Qual lenda da tradição gaúcha aparece na obra Lendas do Sul?',
-    o:['Negrinho do Pastoreio','Saci-Pererê','Boitatá','Iara'], a:0,
-    e:'O Negrinho do Pastoreio é uma das lendas mais conhecidas da tradição gaúcha e está entre as histórias registradas pelo autor.' },
-  { q:'Qual característica marca a linguagem das obras de Simões Lopes Neto?',
-    o:['Latim clássico','Linguagem regional gaúcha','Inglês arcaico','Português europeu padrão'], a:1,
-    e:'Ele registrou o falar do gaúcho, com palavras e expressões do Sul, valorizando a cultura popular.' },
-  { q:'Em que ano ele faleceu?',
-    o:['1900','1916','1925','1931'], a:1,
-    e:'Simões Lopes Neto faleceu em 1916, em Pelotas.' },
   { q:'Em qual estado brasileiro fica Pelotas?',
     o:['Santa Catarina','Paraná','Rio Grande do Sul','Bahia'], a:2,
     e:'Pelotas fica no Rio Grande do Sul, o estado mais meridional do Brasil.' },
-  { q:'Qual movimento cultural valoriza as tradições do gaúcho e dialoga com essas obras?',
-    o:['Modernismo paulista','Tradicionalismo gaúcho','Barroco mineiro','Romantismo carioca'], a:1,
-    e:'O tradicionalismo gaúcho valoriza costumes, música e literatura do campo, temas presentes na obra do autor.' },
+  { q:'Qual lenda da tradição gaúcha aparece na obra Lendas do Sul?',
+    o:['Negrinho do Pastoreio','Saci-Pererê','Boitatá','Iara'], a:0,
+    e:'O Negrinho do Pastoreio é uma das lendas mais conhecidas da tradição gaúcha e está entre as histórias registradas pelo autor.' },
+  { q:'Em que ano Simões Lopes Neto nasceu?',
+    o:['1845','1865','1880','1899'], a:1,
+    e:'João Simões Lopes Neto nasceu em 1865.' },
+  { q:'Além de escritor, em qual atividade Simões Lopes Neto também se destacou?',
+    o:['Engenharia ferroviária','Pintura de murais','Pesquisa do folclore e da cultura popular','Futebol profissional'], a:2,
+    e:'Ele também pesquisou o folclore e a cultura popular do Sul, o que alimentou suas narrativas.' },
+  { q:'Em qual cidade gaúcha nasceu João Simões Lopes Neto?',
+    o:['Porto Alegre','Pelotas','Bagé','Santa Maria'], a:1,
+    e:'Ele nasceu em Pelotas, no sul do Rio Grande do Sul, cidade onde viveu grande parte da vida.' },
   { q:'Em que formato literário estão os Contos Gauchescos?',
     o:['Poesia épica','Teatro','Narrativas curtas em prosa','Crônica esportiva'], a:2,
     e:'Os contos são narrativas em prosa, com personagens e cenas do campo gaúcho.' },
-  { q:'Além de escritor, em qual atividade Simões Lopes Neto também se destacou?',
-    o:['Engenharia ferroviária','Pintura de murais','Pesquisa do folclore e da cultura popular','Futebol profissional'], a:2,
-    e:'Ele também pesquisou o folclore e a cultura popular do Sul, o que alimentou suas narrativas.' }
+  { q:'Em que ano ele faleceu?',
+    o:['1900','1916','1925','1931'], a:1,
+    e:'Simões Lopes Neto faleceu em 1916, em Pelotas.' },
+  { q:'Qual característica marca a linguagem das obras de Simões Lopes Neto?',
+    o:['Latim clássico','Linguagem regional gaúcha','Inglês arcaico','Português europeu padrão'], a:1,
+    e:'Ele registrou o falar do gaúcho, com palavras e expressões do Sul, valorizando a cultura popular.' },
+  { q:'Qual movimento cultural valoriza as tradições do gaúcho e dialoga com essas obras?',
+    o:['Modernismo paulista','Tradicionalismo gaúcho','Barroco mineiro','Romantismo carioca'], a:1,
+    e:'O tradicionalismo gaúcho valoriza costumes, música e literatura do campo, temas presentes na obra do autor.' }
 ];
 
 /* =========================================================
@@ -290,7 +313,7 @@ const dust = [];                // poeira do pampa em parallax
 /* Dimensões do canvas e escala (preenche a tela inteira) */
 let CW = 0, CH = 0, SCALE = 1, OFFY = 0, VW = 800;
 function resize(){
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, Q().dpr);
   CW = Math.round(innerWidth * dpr);
   CH = Math.round(innerHeight * dpr);
   canvas.width = CW;
@@ -315,7 +338,8 @@ function makePlayer(x, y){
 }
 
 function burst(x, y, color, n){
-  for (let i = 0; i < n; i++){
+  const count = Math.max(1, Math.round(n * Q().burst));
+  for (let i = 0; i < count; i++){
     particles.push({ x, y, vx:(Math.random() - 0.5) * 5, vy:(Math.random() - 0.9) * 5,
                      life:28 + Math.random() * 20, color });
   }
@@ -382,6 +406,15 @@ function showWin(){
     ? '🍬 Você acertou tudo e ganhou 1 doce de verdade!'
     : 'Não foi dessa vez. Para ganhar o doce, acerte todas as 10 perguntas.';
   showOnly('win');
+}
+
+/* Atalho secreto: zera o jogo com todas as respostas certas */
+function cheatWin(){
+  if (state === 'win') return;
+  correctCount = LEVELS.length;
+  score += 5000;
+  levelIdx = LEVELS.length - 1;
+  showWin();
 }
 
 function pauseGame(){
@@ -567,7 +600,7 @@ function update(){
 }
 
 /* =========================================================
-   DESENHO — cenário com camadas de parallax e iluminação
+   DESENHO — cenário com camadas de parallax (ajustado pela qualidade)
    ========================================================= */
 const CLOUDS = Array.from({ length:9 }, (_, i) => ({
   x: i * 160 + (i % 2) * 30, y: 60 + (i * 37) % 90, s: 0.9 + (i % 3) * 0.2
@@ -589,11 +622,13 @@ function drawCloud(x, y, s){
   ctx.arc(x + 22 * s, y - 8 * s, 22 * s, 0, Math.PI * 2);
   ctx.arc(x + 46 * s, y, 16 * s, 0, Math.PI * 2);
   ctx.fill();
-  // sombra inferior da nuvem
-  ctx.fillStyle = 'rgba(180,120,90,.18)';
-  ctx.beginPath();
-  ctx.ellipse(x + 22 * s, y + 10 * s, 36 * s, 6 * s, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (quality !== 'low'){
+    // sombra inferior da nuvem
+    ctx.fillStyle = 'rgba(180,120,90,.18)';
+    ctx.beginPath();
+    ctx.ellipse(x + 22 * s, y + 10 * s, 36 * s, 6 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function hillLayer(par, colorTop, colorBot, base, amp, seed){
@@ -627,7 +662,7 @@ function trees(par, by, scale, dark){
     ctx.beginPath();
     ctx.ellipse(sx, by - 38 * h, 18 * h, 20 * h, 0, 0, Math.PI * 2);
     ctx.fill();
-    if (!dark){
+    if (!dark && quality !== 'low'){
       ctx.fillStyle = 'rgba(160,200,110,.25)';
       ctx.beginPath();
       ctx.ellipse(sx - 5 * h, by - 44 * h, 8 * h, 9 * h, 0, 0, Math.PI * 2);
@@ -667,7 +702,9 @@ function drawSky(){
   ctx.fillRect(-100, -400, VW + 200, H + 800);
 
   // Estrelas piscando na parte alta do céu
-  for (const s of STARS){
+  const nStars = Q().stars;
+  for (let i = 0; i < nStars; i++){
+    const s = STARS[i];
     const tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 0.05 + s.ph));
     const x = ((s.x - cam * 0.02) % 1600 + 1600) % 1600 - 100;
     ctx.fillStyle = `rgba(255,250,235,${0.8 * tw})`;
@@ -687,7 +724,9 @@ function drawSky(){
 
   // Nuvens (parallax lento e repetição)
   const span = 1440;
-  for (const c of CLOUDS){
+  const nClouds = Q().clouds;
+  for (let i = 0; i < nClouds; i++){
+    const c = CLOUDS[i];
     const x = ((c.x - cam * 0.08) % span + span) % span - 150;
     drawCloud(x, c.y, c.s);
   }
@@ -722,8 +761,9 @@ function drawGround(pl){
   ctx.fillStyle = '#7bb74e';
   ctx.fillRect(pl.x, pl.y, pl.w, 3);
 
-  // Lâminas de grama balançando com o vento
-  for (let gx = pl.x + 4; gx < pl.x + pl.w; gx += 9){
+  // Lâminas de grama balançando com o vento (menos lâminas nos gráficos baixos)
+  const gStep = Q().grass;
+  for (let gx = pl.x + 4; gx < pl.x + pl.w; gx += gStep){
     const h = 3 + hash(gx) * 6;
     const sway = Math.sin(t * 0.06 + gx * 0.2) * 1.6;
     ctx.fillStyle = hash(gx + 3) > 0.5 ? '#4a8230' : '#5f9a3c';
@@ -741,11 +781,13 @@ function drawGround(pl){
     ctx.arc(gx + hash(gx) * 8, pl.y + 30 + hash(gx + 1) * 40, 2 + hash(gx + 2) * 2, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.fillStyle = 'rgba(200,180,150,.18)';
-  for (let gx = pl.x + 30; gx < pl.x + pl.w; gx += 47){
-    ctx.beginPath();
-    ctx.arc(gx + hash(gx + 5) * 10, pl.y + 20 + hash(gx + 6) * 30, 1.5, 0, Math.PI * 2);
-    ctx.fill();
+  if (quality !== 'low'){
+    ctx.fillStyle = 'rgba(200,180,150,.18)';
+    for (let gx = pl.x + 30; gx < pl.x + pl.w; gx += 47){
+      ctx.beginPath();
+      ctx.arc(gx + hash(gx + 5) * 10, pl.y + 20 + hash(gx + 6) * 30, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -828,6 +870,11 @@ function drawCoins(){
   for (const c of level.coins){
     if (c.taken) continue;
     const y = c.y + Math.sin(t * 0.1 + c.x) * 2.5;
+    if (quality === 'low'){
+      ctx.fillStyle = '#ffd54a';
+      ctx.beginPath(); ctx.arc(c.x, y, 7, 0, Math.PI * 2); ctx.fill();
+      continue;
+    }
     const g = ctx.createRadialGradient(c.x - 2, y - 2, 1, c.x, y, 8);
     g.addColorStop(0, '#fff6b0');
     g.addColorStop(0.5, '#ffd54a');
@@ -860,7 +907,7 @@ function drawGoal(){
 
 /* Sombra do jogador no chão */
 function drawShadow(){
-  if (!p.onGround) return;
+  if (!p.onGround || !Q().shadow) return;
   ctx.fillStyle = 'rgba(0,0,0,.25)';
   ctx.beginPath();
   ctx.ellipse(p.x + PW / 2, p.y + PH + 1, 13, 3.5, 0, 0, Math.PI * 2);
@@ -939,8 +986,11 @@ function drawPlayer(){
 
 /* Poeira flutuando, com parallax leve */
 function drawDust(){
+  const n = Q().dust;
+  if (!n) return;
   ctx.fillStyle = 'rgba(255,230,190,.35)';
-  for (const d of dust){
+  for (let i = 0; i < n; i++){
+    const d = dust[i];
     const x = ((d.x - cam * 0.5 + t * 0.2 * d.s) % 1200 + 1200) % 1200 - 100;
     const y = d.y + Math.sin(t * 0.02 + d.x) * 6;
     ctx.beginPath(); ctx.arc(x, y, d.s, 0, Math.PI * 2); ctx.fill();
@@ -971,7 +1021,7 @@ function drawHUD(){
   if (!level) return;
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,.7)';
-  ctx.shadowBlur = 4;
+  ctx.shadowBlur = quality === 'low' ? 0 : 4;
 
   ctx.font = 'bold 15px Georgia, serif';
   ctx.fillStyle = '#fff3d6';
@@ -1005,7 +1055,7 @@ function drawHUD(){
     ctx.globalAlpha = Math.min(1, banner / 30);
     ctx.textAlign = 'center';
     ctx.font = 'bold 26px Georgia, serif';
-    ctx.shadowBlur = 6;
+    ctx.shadowBlur = quality === 'low' ? 0 : 6;
     ctx.fillStyle = '#e8b44a';
     ctx.fillText(bannerText, VW / 2, H * 0.35);
     ctx.globalAlpha = 1;
@@ -1013,8 +1063,9 @@ function drawHUD(){
   ctx.restore();
 }
 
-/* Vinheta: escurece as bordas para dar profundidade */
+/* Vinheta: escurece as bordas para dar profundidade (não existe no modo baixo) */
 function drawVignette(){
+  if (!Q().vignette) return;
   const g = ctx.createRadialGradient(CW / 2, CH / 2, Math.min(CW, CH) * 0.35, CW / 2, CH / 2, Math.max(CW, CH) * 0.75);
   g.addColorStop(0, 'rgba(0,0,0,0)');
   g.addColorStop(1, 'rgba(10,5,2,.45)');
@@ -1063,10 +1114,25 @@ function draw(){
 }
 
 /* =========================================================
+   MEDIDOR DE FPS
+   ========================================================= */
+const fpsBox = $('fpsBox');
+let fpsFrames = 0, fpsSince = performance.now();
+
+/* =========================================================
    LOOP PRINCIPAL (requestAnimationFrame + passo fixo)
    ========================================================= */
 let acc = 0, last = performance.now();
 function frame(now){
+  // FPS: conta quadros e atualiza o texto a cada 0,5 s
+  fpsFrames++;
+  if (now - fpsSince >= 500){
+    const fps = Math.round(fpsFrames * 1000 / (now - fpsSince));
+    fpsBox.textContent = `FPS: ${fps}`;
+    fpsFrames = 0;
+    fpsSince = now;
+  }
+
   acc += Math.min(now - last, 200);
   last = now;
   while (acc >= STEP){
@@ -1099,6 +1165,16 @@ function release(a){ inp[a] = false; }
 function resetInputs(){ for (const k in inp) inp[k] = false; }
 
 window.addEventListener('keydown', e => {
+  // Frase secreta: acumula as letras digitadas
+  if (e.key && e.key.length === 1){
+    secretBuf = (secretBuf + e.key.toLowerCase()).slice(-SECRET.length);
+    if (secretBuf === SECRET){
+      secretBuf = '';
+      cheatWin();
+      return;
+    }
+  }
+
   const c = e.code;
   if (KEYMAP[c] || c === 'Space') e.preventDefault();
 
@@ -1151,6 +1227,15 @@ document.querySelectorAll('.tbtn').forEach(b => {
   b.addEventListener('lostpointercapture', up);
 });
 
+/* Qualidade gráfica: cicla Baixo -> Médio -> Alto */
+const gfxBtn = $('gfxBtn');
+function refreshGfxBtn(){ gfxBtn.textContent = `Gráficos: ${Q().label}`; }
+gfxBtn.onclick = () => {
+  quality = QORDER[(QORDER.indexOf(quality) + 1) % QORDER.length];
+  refreshGfxBtn();
+  resize();
+};
+
 $('btnStart').onclick = startGame;
 $('btnRestart').onclick = startGame;
 $('btnWinRestart').onclick = startGame;
@@ -1165,6 +1250,7 @@ window.addEventListener('orientationchange', resize);
 /* =========================================================
    INICIALIZAÇÃO
    ========================================================= */
+refreshGfxBtn();
 resize();
 level = buildLevel(0);
 p = makePlayer(60, GROUND_Y - PH);
