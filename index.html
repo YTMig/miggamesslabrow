@@ -172,7 +172,7 @@ const DASH_COOLDOWN = 45;      // espera entre dashes
 const PW = 26, PH = 40;        // tamanho do jogador
 const GROUND_Y = 400;          // topo do chão
 const STEP = 1000 / 60;        // passo fixo da física (60 atualizações por segundo)
-const FPS_CAP = 99999;             // limite de FPS: 0 = sem limite; ex.: 30 ou 60
+const FPS_CAP = 0;             // limite de FPS: 0 = sem limite; ex.: 30, 60, 120, 144
 const MIN_VW = 600;            // menor largura visível do mundo
 const LIVES_MAX = 3;
 const QUIZ_DELAY = 700;        // ms até o quiz aceitar resposta
@@ -1121,17 +1121,28 @@ const fpsBox = $('fpsBox');
 let fpsFrames = 0, fpsSince = performance.now();
 
 /* =========================================================
-   LOOP PRINCIPAL (requestAnimationFrame + passo fixo + limite opcional de FPS)
+   LOOP PRINCIPAL
+   Usa MessageChannel em vez de requestAnimationFrame, então
+   não fica preso aos 60 Hz da tela.
+   Observação: a tela só mostra o que o monitor consegue exibir.
+   Num monitor de 60 Hz, o contador pode passar de 60, mas a
+   imagem visível continua em 60.
    ========================================================= */
+const loopChannel = new MessageChannel();
 let acc = 0, last = performance.now(), lastDraw = 0;
-function frame(now){
-  requestAnimationFrame(frame);
 
-  // Limite de FPS: pula o quadro se ainda não passou o intervalo mínimo
-  if (FPS_CAP > 0 && now - lastDraw < 1000 / FPS_CAP - 1) return;
+loopChannel.port1.onmessage = () => {
+  const now = performance.now();
+  const minGap = FPS_CAP > 0 ? 1000 / FPS_CAP : 0;
+
+  // Limite de FPS: se ainda não passou o intervalo, só agenda o próximo tick
+  if (now - lastDraw < minGap - 0.5){
+    loopChannel.port2.postMessage(0);
+    return;
+  }
   lastDraw = now;
 
-  // FPS: conta quadros e atualiza o texto a cada 0,5 s
+  // Contador de FPS (atualiza a cada 0,5 s)
   fpsFrames++;
   if (now - fpsSince >= 500){
     const fps = Math.round(fpsFrames * 1000 / (now - fpsSince));
@@ -1140,6 +1151,7 @@ function frame(now){
     fpsSince = now;
   }
 
+  // Física em passo fixo (60 atualizações por segundo, independente do FPS)
   acc += Math.min(now - last, 200);
   last = now;
   while (acc >= STEP){
@@ -1150,8 +1162,10 @@ function frame(now){
     t++;
     acc -= STEP;
   }
+
   draw();
-}
+  loopChannel.port2.postMessage(0);
+};
 
 /* =========================================================
    ENTRADA: teclado, toque e eventos da janela
@@ -1261,7 +1275,7 @@ resize();
 level = buildLevel(0);
 p = makePlayer(60, GROUND_Y - PH);
 showOnly('menu');
-requestAnimationFrame(frame);
+loopChannel.port2.postMessage(0);
 </script>
 </body>
 </html>
